@@ -205,6 +205,7 @@ class OnigScanner {
         if (!onigBinding) {
             throw new Error(`Must invoke loadWASM first.`);
         }
+        this._patternCount = patterns.length;
         const strPtrsArr = [];
         const strLenArr = [];
         for (let i = 0, len = patterns.length; i < len; i++) {
@@ -272,6 +273,24 @@ class OnigScanner {
         let offset = resultPtr / 4; // byte offset -> uint32 offset
         const index = HEAPU32[offset++];
         const count = HEAPU32[offset++];
+        // Get durations address in the heap
+        const durationsPtr = onigBinding._getLastDurations();
+        const HEAPF64 = onigBinding.HEAPF64;
+        let durationsOffset = durationsPtr / 8; // byte offset -> float64 offset
+        // Read durations up to pattern count (max. 1000)
+        const durations = [];
+        const limit = Math.min(this._patternCount, 1000);
+        for (let i = 0; i < limit; i++) {
+            durations.push(HEAPF64[durationsOffset + i]);
+        }
+        // Intercept no match (index '-1' signed or unsigned)
+        if (index === -1 || index === 4294967295) {
+            return {
+                index: -1,
+                captureIndices: [],
+                durations: durations
+            };
+        }
         let captureIndices = [];
         for (let i = 0; i < count; i++) {
             const beg = string.convertUtf8OffsetToUtf16(HEAPU32[offset++]);
@@ -284,7 +303,8 @@ class OnigScanner {
         }
         return {
             index: index,
-            captureIndices: captureIndices
+            captureIndices: captureIndices,
+            durations: durations
         };
     }
     onigOptions(options) {

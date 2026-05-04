@@ -359,10 +359,14 @@ export class OnigScanner implements IOnigScanner {
 	private readonly _ptr: Pointer;
 	private readonly _options: FindOption[];
 
+	// Add number of patterns to know how many durations to read
+	private readonly _patternCount: number;
+
 	constructor(patterns: string[], config?: IOnigScannerConfig) {
 		if (!onigBinding) {
 			throw new Error(`Must invoke loadWASM first.`);
 		}
+		this._patternCount = patterns.length;
 		const strPtrsArr: Pointer[] = [];
 		const strLenArr: number[] = [];
 		for (let i = 0, len = patterns.length; i < len; i++) {
@@ -438,6 +442,29 @@ export class OnigScanner implements IOnigScanner {
 		let offset = resultPtr / 4; // byte offset -> uint32 offset
 		const index = HEAPU32[offset++];
 		const count = HEAPU32[offset++];
+
+
+		// Get durations address in the heap
+		const durationsPtr = (onigBinding as any)._getLastDurations();
+        const HEAPF64 = (onigBinding as any).HEAPF64;
+        let durationsOffset = durationsPtr / 8; // byte offset -> float64 offset
+
+		// Read durations up to pattern count (max. 1000)
+        const durations: number[] = [];
+        const limit = Math.min(this._patternCount, 1000);
+        for (let i = 0; i < limit; i++) {
+            durations.push(HEAPF64[durationsOffset + i]);
+        }
+
+		// Intercept no match (index '-1' signed or unsigned)
+		if (index === -1 || index === 4294967295) {
+            return {
+                index: -1,
+                captureIndices: [],
+                durations: durations
+            } as any;
+        }
+
 		let captureIndices: IOnigCaptureIndex[] = [];
 		for (let i = 0; i < count; i++) {
 			const beg = string.convertUtf8OffsetToUtf16(HEAPU32[offset++]);
@@ -450,8 +477,9 @@ export class OnigScanner implements IOnigScanner {
 		}
 		return {
 			index: index,
-			captureIndices: captureIndices
-		};
+			captureIndices: captureIndices,
+			durations: durations
+		} as any;
 	}
 
 	private onigOptions(options: FindOption[]): number {
