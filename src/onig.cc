@@ -88,6 +88,14 @@ typedef struct OnigScanner_ {
 int lastOnigStatus = 0;
 OnigErrorInfo lastOnigErrorInfo;
 
+// Add memory block to store durations (max. 1000 regexes per scope)
+double lastDurations[1000];
+
+EMSCRIPTEN_KEEPALIVE
+double* getLastDurations() {
+  return lastDurations;
+}
+
 EMSCRIPTEN_KEEPALIVE
 char* getLastOnigError()
 {
@@ -263,6 +271,13 @@ int findNextOnigScannerMatch(OnigScanner* scanner, int strCacheId, unsigned char
   int i;
   int location;
 
+  // Reset durations for this match search
+  for (i = 0; i < scanner->count && i < 1000; i++) {
+    lastDurations[i] = 0.0;
+  }
+
+  // This part avoids profiling short lines, we want to avoid this
+  /*
   if (strLength < 1000) {
     // for short strings, it is better to use the RegSet API, but for longer strings caching pays off
     bestResultIndex = onig_regset_search(scanner->rset, strData, strData + strLength, strData + position, strData + strLength,
@@ -272,9 +287,22 @@ int findNextOnigScannerMatch(OnigScanner* scanner, int strCacheId, unsigned char
     }
     return encodeOnigRegion(onig_regset_get_region(scanner->rset, bestResultIndex), bestResultIndex);
   }
+    */
 
   for (i = 0; i < scanner->count; i++) {
+
+    // Start timing this regex search
+    double startTime = emscripten_get_now();
+
     result = searchOnigRegExp(scanner->regexes[i], strCacheId, strData, strLength, position, options);
+
+    // End timing this regex search and store it
+    double endTime = emscripten_get_now();
+    double elapsedTime = endTime - startTime;
+    if (i < 1000) lastDurations[i] = elapsedTime;
+    printf("Test: Regex %d took %f ms\n", i, elapsedTime);
+
+
     if (result != NULL && result->num_regs > 0) {
       location = result->beg[0];
 
@@ -291,7 +319,12 @@ int findNextOnigScannerMatch(OnigScanner* scanner, int strCacheId, unsigned char
   }
 
   if (bestResult == NULL) {
-    return 0;
+    // No match, return index -1 and 0 capture groups
+    // (we return index -1 to keep durations for "no match" case)
+    static int noMatchResult[2];
+    noMatchResult[0] = -1; // index -1 (no match)
+    noMatchResult[1] = 0;  // No capture groups
+    return (int)noMatchResult;
   }
 
   return encodeOnigRegion(bestResult, bestResultIndex);
