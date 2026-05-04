@@ -300,8 +300,6 @@ int findNextOnigScannerMatch(OnigScanner* scanner, int strCacheId, unsigned char
     double endTime = emscripten_get_now();
     double elapsedTime = endTime - startTime;
     if (i < 1000) lastDurations[i] = elapsedTime;
-    printf("Test: Regex %d took %f ms\n", i, elapsedTime);
-
 
     if (result != NULL && result->num_regs > 0) {
       location = result->beg[0];
